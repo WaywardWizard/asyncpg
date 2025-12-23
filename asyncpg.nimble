@@ -6,4 +6,6 @@ license     = "MIT"
 # Skip tests directory
 skipDirs = @["tests"]
 # Deps
-requires "nim >= 0.16.0"
+requires "nim >= 2.0.0"
+
+requires "db_connector >= 0.1.0"

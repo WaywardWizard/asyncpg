@@ -9,8 +9,8 @@ proc testTypes(conn: apgConnection) {.async.} =
     # expect: "3"
 
   block: # char type test
-    var a = 0x30'u8
-    var res = await exec(conn, "SELECT $1 || $2", a, 0x31'u8)
+    var a:uint8 = 0x30'u8
+    var res = await exec(conn, "SELECT $1::text || $2::text", a, 0x31'u8)
     var value = getValue(res[0])
     close(res)
     doAssert(value == "01")
@@ -41,7 +41,7 @@ proc testTypes(conn: apgConnection) {.async.} =
     # expect: "Hello World!"
 
   block: # cstring test
-    var a = cast[cstring]("Hello C ")
+    var a:cstring = "Hello C "
     var res = await exec(conn, "SELECT $1 || $2", a, "World!")
     var value = getValue(res[0])
     close(res)

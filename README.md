@@ -27,7 +27,7 @@ $ nimble install https://github.com/cheatfate/asyncpg.git
 ## Minimal requirements
 
 - PostgreSQL 9.x (if you want to have support for JSONB types, you need PostgreSQL 9.4 at least)
-- Nim language compiler 0.14.2
+- Nim language compiler 2.0.0 or newer
 
 ## Documentation
 
