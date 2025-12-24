@@ -13,31 +13,31 @@ import db_connector/postgres, asyncdispatch, strutils, macros, json, lists
 import byteswap, apg_array, apg_json # byteswap neede for macros
 
 type
-  apgNotify* = object
+  ApgNotify* = object
     ## Object which represents PostgreSQL's asynchronous notify
     channel*: string
     payload*: string
     bepid: int
 
-  apgNotifyCell = object
-    notify: apgNotify
-    future: Future[apgNotify]
+  ApgNotifyCell = object
+    notify: ApgNotify
+    future: Future[ApgNotify]
 
-  apgConnection* = ref object of RootRef
+  ApgConnection* = ref object of RootRef
     ## Object which encapsulate connection to PostgreSQL database.
     pgconn: PPGconn
-    notifies: DoublyLinkedList[apgNotifyCell]
+    notifies: DoublyLinkedList[ApgNotifyCell]
     notices: seq[string]
 
-  apgResult* = ref object of RootRef
+  ApgResult* = ref object of RootRef
     ## Object which encapsulate result of executed SQL query.
     pgress: seq[PPGresult]
 
-  apgPool* = ref object of RootRef
+  ApgPool* = ref object of RootRef
     ## Object which encapsulates pool of connections to PostgreSQL database.
-    connections: seq[apgConnection]
+    connections: seq[ApgConnection]
     futures: seq[Future[void]]
-    notifies: DoublyLinkedList[apgNotifyCell]
+    notifies: DoublyLinkedList[ApgNotifyCell]
 
   Row* = seq[string]  ## a row of a dataset. NULL database values will be
                       ## converted to nil.
@@ -56,7 +56,7 @@ proc pqlibVersion(): cint
 proc pqserverVersion(conn: PPGconn): cint
      {.cdecl, dynlib: dllname, importc: "PQserverVersion".}
 
-proc getFreeConnection(pool: apgPool): Future[int] =
+proc getFreeConnection(pool: ApgPool): Future[int] =
   var retFuture = newFuture[int]("asyncpg.getFreeConnection")
   proc cb() =
     if not retFuture.finished:
@@ -92,22 +92,22 @@ proc getFreeConnection(pool: apgPool): Future[int] =
 #     pool.futures[index].callback = cb
 #   return retFuture
 
-proc newPool*(size = 10): apgPool =
+proc newPool*(size = 10): ApgPool =
   ## Creates new object ``apgPool`` with ``size`` connections inside.
 
-  result = apgPool()
-  result.connections = newSeq[apgConnection](size)
+  result = ApgPool()
+  result.connections = newSeq[ApgConnection](size)
   result.futures = newSeq[Future[void]](size)
 
 proc noticeReceiver*(arg: pointer, res: PPGresult) {.cdecl.} =
-  var conn = cast[apgConnection](arg)
+  var conn = cast[ApgConnection](arg)
   conn.notices.add($pqresultErrorMessage(res))
 
-proc connect*(connection: string): Future[apgConnection] =
+proc connect*(connection: string): Future[ApgConnection] =
   ## Establish connection to PostgreSQL database using ``connection`` string.
 
-  var retFuture = newFuture[apgConnection]("asyncpg.connect")
-  var conn = apgConnection()
+  var retFuture = newFuture[ApgConnection]("asyncpg.connect")
+  var conn = ApgConnection()
 
   proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
     if not retFuture.finished:
@@ -130,7 +130,7 @@ proc connect*(connection: string): Future[apgConnection] =
                                     cast[PQnoticeReceiver](noticeReceiver),
                                     cast[pointer](conn))
         # allocate sequence for notify objects
-        conn.notifies = initDoublyLinkedList[apgNotifyCell]()
+        conn.notifies = initDoublyLinkedList[ApgNotifyCell]()
         retFuture.complete(conn)
       else:
         retFuture.fail(newException(ValueError,
@@ -145,7 +145,7 @@ proc connect*(connection: string): Future[apgConnection] =
   discard cb(socket)
   return retFuture
 
-proc reset*(conn: apgConnection): Future[void] =
+proc reset*(conn: ApgConnection): Future[void] =
   ## Resets PostgreSQL database connection ``conn``.
 
   var retFuture = newFuture[void]("asyncpg.reset")
@@ -182,7 +182,7 @@ proc reset*(conn: apgConnection): Future[void] =
   return retFuture
 
 
-proc close*(conn: apgConnection) =
+proc close*(conn: ApgConnection) =
   ## Closes connection to PostgreSQL server
 
   if conn.pgconn != nil:
@@ -193,7 +193,7 @@ proc close*(conn: apgConnection) =
   else:
     raise newException(ValueError, "Connection is already closed")
 
-proc connect*(pool: apgPool, connection: string): Future[void] {.async.} =
+proc connect*(pool: ApgPool, connection: string): Future[void] {.async.} =
   ## Establish pool's connections to PostgreSQL server using ``connection``
   ## statement.
 
@@ -202,7 +202,7 @@ proc connect*(pool: apgPool, connection: string): Future[void] {.async.} =
     pool.connections[i] = await connect(connection)
     inc(i)
 
-proc close*(pool: apgPool) =
+proc close*(pool: ApgPool) =
   ## Closes pool's connections
 
   var i = 0
@@ -210,7 +210,7 @@ proc close*(pool: apgPool) =
     close(pool.connections[i])
     inc(i)
 
-template processPendingNotifications(conn: apgConnection, notify: bool) =
+template processPendingNotifications(conn: ApgConnection, notify: bool) =
   while true:
     var nres = pqnotifies(conn.pgconn)
     if nres != nil:
@@ -225,8 +225,8 @@ template processPendingNotifications(conn: apgConnection, notify: bool) =
               conn.notifies.remove(node)
               break
       else:
-        var cell = apgNotifyCell()
-        cell.notify = apgNotify()
+        var cell = ApgNotifyCell()
+        cell.notify = ApgNotify()
         cell.notify.channel = channel
         cell.notify.payload = $(nres.extra)
         cell.notify.bepid = nres.be_pid
@@ -235,16 +235,16 @@ template processPendingNotifications(conn: apgConnection, notify: bool) =
     else:
       break
 
-proc copyTo*(conn: apgConnection, buffer: pointer,
-            nbytes: int32): Future[apgResult] =
+proc copyTo*(conn: ApgConnection, buffer: pointer,
+            nbytes: int32): Future[ApgResult] =
   ## Copy data from buffer ``buffer`` of size ``nbytes`` to PostgreSQL's
   ## stdin. 
   ## Be sure to execute ``COPY FROM`` statement before start sending data with
   ## this function. After all data have been sent, you need to finish sending
   ## process with call ``copyTo(conn, nil, 0)``.
   ## Function returns apgResult.
-  var retFuture = newFuture[apgResult]("asyncpg.copyTo")
-  var apgres = apgResult()
+  var retFuture = newFuture[ApgResult]("asyncpg.copyTo")
+  var apgres = ApgResult()
   apgres.pgress = newSeq[PPGresult]()
   var state = 0
   var notify = true
@@ -327,7 +327,7 @@ proc copyTo*(conn: apgConnection, buffer: pointer,
 
   return retFuture
 
-proc copyFromInto*(conn: apgConnection, buffer: pointer,
+proc copyFromInto*(conn: ApgConnection, buffer: pointer,
                    nbytes: int): Future[int] =
   ## Copy data caused by sql `COPY TO` statement to buffer `buffer`.
   ## Because rows received one by one, size of buffer `nbytes` must be
@@ -337,7 +337,7 @@ proc copyFromInto*(conn: apgConnection, buffer: pointer,
   ## function.
 
   var retFuture = newFuture[int]("asyncpg.copyFrom")
-  var apgres = apgResult()
+  var apgres = ApgResult()
   apgres.pgress = newSeq[PPGresult]()
   var state = 0
   var notify = true
@@ -385,7 +385,7 @@ proc copyFromInto*(conn: apgConnection, buffer: pointer,
   discard cb(fd)
   return retFuture
 
-template withConnection*(pool: apgPool, conn, body: untyped) =
+template withConnection*(pool: ApgPool, conn, body: untyped) =
   ## Retrieves first available connection from pool, assign it
   ## to variable with name `conn`. You can use this connection
   ## inside withConnection code block.
@@ -398,11 +398,11 @@ template withConnection*(pool: apgPool, conn, body: untyped) =
     body
   pool.futures[index].complete()
 
-proc execAsync(conn: apgConnection, statement: string, pN: int32, pT: POid,
+proc execAsync(conn: ApgConnection, statement: string, pN: int32, pT: POid,
                pV: cstringArray, pL, pF: ptr int32,
-               rF: int32, notify = true): Future[apgResult] =
-  var retFuture = newFuture[apgResult]("asyncpg.exec")
-  var apgres = apgResult()
+               rF: int32, notify = true): Future[ApgResult] =
+  var retFuture = newFuture[ApgResult]("asyncpg.exec")
+  var apgres = ApgResult()
   apgres.pgress = newSeq[PPGresult]()
   var state = 0
 
@@ -462,7 +462,7 @@ proc execAsync(conn: apgConnection, statement: string, pN: int32, pT: POid,
     discard cb(fd)
   return retFuture
 
-proc execPoolAsync(pool: apgPool, statement: string, pN: int32, pT: POid,
+proc execPoolAsync(pool: ApgPool, statement: string, pN: int32, pT: POid,
                    pV: cstringArray, pL, pF: ptr int32,
                    rF: int32): Future[apgResult] {.async.} =
   var index = await getFreeConnection(pool)
@@ -479,19 +479,19 @@ proc execPoolAsync(pool: apgPool, statement: string, pN: int32, pT: POid,
 
   pool.futures[index].complete()
 
-proc len*(apgres: apgResult): int =
+proc len*(apgres: ApgResult): int =
   ## Returns number of query results stored inside ``apgres``.
 
   result = len(apgres.pgress)
 
-proc close*(apgres: apgResult) =
+proc close*(apgres: ApgResult) =
   ## Closes query results stored inside ``apgres``.
 
   for pgr in apgres.pgress:
     pqclear(pgr)
   apgres.pgress.setLen(0)
 
-proc `[]`*(apgres: apgResult, index: int): PPGresult =
+proc `[]`*(apgres: ApgResult, index: int): PPGresult =
   ## Returns query result from ``apgres`` by ``index``.
 
   result = apgres.pgress[index]
@@ -563,7 +563,7 @@ proc getAffectedRows*(pgres: PPGresult): int64 =
 
   result = parseBiggestInt($pqcmdTuples(pgres))
 
-proc setClientEncoding*(conn: apgConnection,
+proc setClientEncoding*(conn: ApgConnection,
                         encoding: string): Future[void] {.async.} =
   ## Sets the client encoding.
 
@@ -573,7 +573,7 @@ proc setClientEncoding*(conn: apgConnection,
     raise newException(ValueError, $pqerrorMessage(conn.pgconn))
   close(ares)
 
-proc getClientEncoding*(conn: apgConnection): string =
+proc getClientEncoding*(conn: ApgConnection): string =
   ## Returns the client encoding.
 
   result = $pgEncodingToChar(pqclientEncoding(conn.pgconn))
@@ -583,12 +583,12 @@ proc getVersion*(): int =
 
   result = pqlibVersion().int
 
-proc getServerVersion*(conn: apgConnection): int =
+proc getServerVersion*(conn: ApgConnection): int =
   ## Returns an integer representing the backend version.
 
   result = pqserverVersion(conn.pgconn).int
 
-proc getProtocolVersion*(conn: apgConnection): int =
+proc getProtocolVersion*(conn: ApgConnection): int =
   ## Interrogates the frontend/backend protocol being used.
 
   result = pqprotocolVersion(conn.pgconn).int
@@ -864,8 +864,8 @@ proc getSequence(ls, ps, op, ntp, np, pv, pl, pt, pf: NimNode) {.compileTime.} =
   else:
     showError("Argument's type `seq[" & $impType & "]`is not supported", op)
 
-macro exec*(conn: apgConnection|apgPool, statement: string,
-            params: varargs[typed]): Future[apgResult] =
+macro exec*(conn: ApgConnection|ApgPool, statement: string,
+            params: varargs[typed]): Future[ApgResult] =
   ## Submits a command ``statement`` to the server connection
   ## or connection's pool. ``params`` is SQL parameters which will
   ## be passed with command.
@@ -1046,7 +1046,7 @@ template checkResultTuple(res) =
   if sres != PGRES_TUPLES_OK:
     raise newException(ValueError, $pqerrorMessage(res.pgress[0].conn))
 
-proc listenNotify*(conn: apgConnection,
+proc listenNotify*(conn: ApgConnection,
                    channel: string): Future[void] {.async.} =
   ## Registers listening for asynchronous notifies on connection ``conn`` and
   ## channel ``channel``.
@@ -1055,7 +1055,7 @@ proc listenNotify*(conn: apgConnection,
   var res = await exec(conn, query)
   checkResultCommand(res)
 
-proc listenNotify*(pool: apgPool,
+proc listenNotify*(pool: ApgPool,
                    channel: string): Future[void] {.async.} =
   ## Registers listening for asynchronous notifies on pool ``pool`` and
   ## channel ``channel``.
@@ -1064,7 +1064,7 @@ proc listenNotify*(pool: apgPool,
   var res = await exec(pool, query)
   checkResultCommand(res)
 
-proc unlistenNotify*(conn: apgConnection,
+proc unlistenNotify*(conn: ApgConnection,
                      channel: string): Future[void] {.async.} =
   ## Unregisters listening for asynchronous notifies on connection ``conn`` and
   ## channel ``channel``.
@@ -1073,7 +1073,7 @@ proc unlistenNotify*(conn: apgConnection,
   var res = await exec(conn, query)
   checkResultCommand(res)
 
-proc unlistenNotify*(pool: apgPool,
+proc unlistenNotify*(pool: ApgPool,
                      channel: string): Future[void] {.async.} =
   ## Unregisters listening for asynchronous notifies on pool ``pool`` and
   ## channel ``channel``.
@@ -1082,7 +1082,7 @@ proc unlistenNotify*(pool: apgPool,
   var res = await exec(pool, query)
   checkResultCommand(res)
 
-proc sendNotify*(conn: apgConnection, channel: string,
+proc sendNotify*(conn: ApgConnection, channel: string,
                  payload: string): Future[void] {.async.} =
   ## Send asynchronous notify to channel ``channel`` with data in ``payload``.
   ## Be sure size of ``payload`` must be less, than 8000 bytes.
@@ -1096,7 +1096,7 @@ proc sendNotify*(conn: apgConnection, channel: string,
   var res = await exec(conn, query, p1, p2)
   checkResultTuple(res)
 
-proc sendNotify*(pool: apgPool, channel: string,
+proc sendNotify*(pool: ApgPool, channel: string,
                  payload: string): Future[void] {.async.} =
   ## Send asynchronous notify to channel ``channel`` with data in ``payload``.
   ## Be sure size of ``payload`` must be less, than 8000 bytes.
@@ -1110,7 +1110,7 @@ proc sendNotify*(pool: apgPool, channel: string,
   var res = await exec(pool, query, p1, p2)
   checkResultTuple(res)
 
-proc notify*(conn: apgConnection|apgPool, channel: string): Future[apgNotify] =
+proc notify*(conn: ApgConnection|ApgPool, channel: string): Future[ApgNotify] =
   ## Returns future, which will receive `apgNotify`, when asynchronous notify
   ## on channel ``channel`` arrives.
 
@@ -1130,7 +1130,7 @@ proc pqescapeByteaConn(conn: PPGconn, bintext: cstring, binlen :int,
                        resultlen: ptr int): cstring
      {.cdecl, dynlib: dllName, importc: "PQescapeByteaConn".}
 
-proc escapeString*(conn: apgConnection, str: string): string =
+proc escapeString*(conn: ApgConnection, str: string): string =
   ## Escapes a string for use within an SQL command according to rules
   ## of connection `conn`.
   var r = pqescapeLiteral(conn.pgconn, cstring(str), len(str))
@@ -1140,7 +1140,7 @@ proc escapeString*(conn: apgConnection, str: string): string =
     result = $r
     pqfreemem(cast[pointer](r))
 
-proc escapeBytea*(conn: apgConnection, buf: pointer, size: int): string =
+proc escapeBytea*(conn: ApgConnection, buf: pointer, size: int): string =
   ## Converts binary data from pointer `buf` and length `size` to
   ## PostgreSQL's BYTEA string representation.
   var s = 0
