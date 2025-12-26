@@ -90,12 +90,12 @@ proc newPgArray*[T](x: openarray[T], swap = false): PgArray[T] =
       copyMem(d, addr ss[0], ml)
       d = d + ml
       inc(i)
-    result = pgArray[T](p: p, size: size, swap: swap)
+    result = PgArray[T](p: p, size: size, swap: swap)
   else:
-    var size = sizeof(pgArrayElement[T]) * len(x) + 20
+    var size = sizeof(PgArrayElement[T]) * len(x) + 20
     var p = alloc(size)
     var h = cast[ptr UncheckedArray[int32]](p)
-    var d = cast[ptr UncheckedArray[pgArrayElement[T]]](p + 20)
+    var d = cast[ptr UncheckedArray[PgArrayElement[T]]](p + 20)
 
     h[0] = prepare(1'i32) # NDIM
     h[1] = 0 # FLAGS
@@ -115,7 +115,7 @@ proc newPgArray*[T](x: openarray[T], swap = false): PgArray[T] =
         d[idx].size = prepare(sizeof(T).int32)
         d[idx].value = x[idx]
         inc(idx)
-    result = pgArray[T](p: p, size: size, swap: swap)
+    result = PgArray[T](p: p, size: size, swap: swap)
 
 proc raw*[T](pga: PgArray[T]): pointer =
   result = pga.p
@@ -148,7 +148,7 @@ proc `$`*[T](pga: PgArray[T]): string =
         r = r & "'" & cs & "'/" & $s
       inc(i)
   else:
-    var d = cast[ptr UncheckedArray[pgArrayElement[T]]](pga.p + 20)
+    var d = cast[ptr UncheckedArray[PgArrayElement[T]]](pga.p + 20)
     var i = 0
     var length = prepare(h[3]).int
     var r = ""

@@ -1,6 +1,6 @@
 import asyncdispatch, asyncpg, json
 
-proc testTypes(conn: apgConnection) {.async.} =
+proc testTypes(conn: ApgConnection) {.async.} =
   block: # empty parameters test
     var res = await asyncpg.exec(conn, "SELECT 3;")
     var value = getValue(res[0])

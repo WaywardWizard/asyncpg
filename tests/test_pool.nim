@@ -2,15 +2,15 @@ import asyncdispatch, asyncpg
 
 const POOL_SIZE = 20
 
-proc makeLongCall(pool: apgPool) {.async.} =
+proc makeLongCall(pool: ApgPool) {.async.} =
   var res = await exec(pool, "SELECT pg_sleep(1);")
   close(res)
 
-proc makeShortCall(pool: apgPool) {.async.} =
+proc makeShortCall(pool: ApgPool) {.async.} =
   var res = await exec(pool, "SELECT pg_sleep(0.5);")
   close(res)
 
-proc testPool(pool: apgPool): Future[bool] {.async.} =
+proc testPool(pool: ApgPool): Future[bool] {.async.} =
   result = false
   var i = 0
   var futs = newSeq[Future[void]](POOL_SIZE)
@@ -27,7 +27,7 @@ proc testPool(pool: apgPool): Future[bool] {.async.} =
   if k == POOL_SIZE:
     result = true
 
-proc testWithConnection(pool: apgPool): Future[bool] {.async.} =
+proc testWithConnection(pool: ApgPool): Future[bool] {.async.} =
   result = true
 
   withConnection(pool, conn) do:

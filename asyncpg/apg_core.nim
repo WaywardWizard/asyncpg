@@ -13,8 +13,7 @@ import postgres, asyncdispatch, strutils, macros, json, lists
 import byteswap, apg_array, apg_json
 
 type
-  ApgNotify* = object
-    ## Object which represents PostgreSQL's asynchronous notify
+  ApgNotify* = object ## Object which represents PostgreSQL's asynchronous notify
     channel*: string
     payload*: string
     bepid: int
@@ -39,8 +38,9 @@ type
     futures: seq[Future[void]]
     notifies: DoublyLinkedList[ApgNotifyCell]
 
-  Row* = seq[string]  ## a row of a dataset. NULL database values will be
-                      ## converted to nil.
+  Row* = seq[string]
+    ## a row of a dataset. NULL database values will be
+    ## converted to nil.
 
 when defined(windows):
   const dllName = "libpq.dll"
@@ -49,12 +49,14 @@ elif defined(macosx):
 else:
   const dllName = "libpq.so(.5|)"
 
-proc pgEncodingToChar(encoding: int32): cstring
-     {.cdecl, dynlib: dllName, importc: "pg_encoding_to_char"}
-proc pqlibVersion(): cint
-     {.cdecl, dynlib: dllName, importc: "PQlibVersion".}
-proc pqserverVersion(conn: PPGconn): cint
-     {.cdecl, dynlib: dllname, importc: "PQserverVersion".}
+proc pgEncodingToChar(
+  encoding: int32
+): cstring {.cdecl, dynlib: dllName, importc: "pg_encoding_to_char".}
+
+proc pqlibVersion(): cint {.cdecl, dynlib: dllName, importc: "PQlibVersion".}
+proc pqserverVersion(
+  conn: PPGconn
+): cint {.cdecl, dynlib: dllname, importc: "PQserverVersion".}
 
 proc getFreeConnection(pool: ApgPool): Future[int] =
   var retFuture = newFuture[int]("asyncpg.getFreeConnection")
@@ -69,6 +71,7 @@ proc getFreeConnection(pool: ApgPool): Future[int] =
           retFuture.complete(index)
           break
         inc(index)
+
   cb()
   # this code will run only if there no available connections left
   if not retFuture.finished:
@@ -78,7 +81,7 @@ proc getFreeConnection(pool: ApgPool): Future[int] =
       inc(index)
   return retFuture
 
-# proc getIndexConnection(pool: apgPool, index: int): Future[int] =
+# proc getIndexConnection(pool: ApgPool, index: int): Future[int] =
 #   var retFuture = newFuture[int]("asyncpg.getIndexConnection")
 #   proc cb() =
 #     if not retFuture.finished:
@@ -93,7 +96,7 @@ proc getFreeConnection(pool: ApgPool): Future[int] =
 #   return retFuture
 
 proc newPool*(size = 10): ApgPool =
-  ## Creates new object ``apgPool`` with ``size`` connections inside.
+  ## Creates new object ``ApgPool`` with ``size`` connections inside.
 
   result = ApgPool()
   result.connections = newSeq[ApgConnection](size)
@@ -109,7 +112,7 @@ proc connect*(connection: string): Future[ApgConnection] =
   var retFuture = newFuture[ApgConnection]("asyncpg.connect")
   var conn = ApgConnection()
 
-  proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
+  proc cb(fd: AsyncFD): bool {.closure, gcsafe.} =
     if not retFuture.finished:
       case pqconnectPoll(conn.pgconn)
       of PGRES_POLLING_READING:
@@ -126,15 +129,14 @@ proc connect*(connection: string): Future[ApgConnection] =
         discard pqsetErrorVerbosity(conn.pgconn, PQERRORS_VERBOSE)
         # set notice receiver
         conn.notices = newSeq[string]()
-        discard pqsetNoticeReceiver(conn.pgconn,
-                                    cast[PQnoticeReceiver](noticeReceiver),
-                                    cast[pointer](conn))
+        discard pqsetNoticeReceiver(
+          conn.pgconn, cast[PQnoticeReceiver](noticeReceiver), cast[pointer](conn)
+        )
         # allocate sequence for notify objects
         conn.notifies = initDoublyLinkedList[ApgNotifyCell]()
         retFuture.complete(conn)
       else:
-        retFuture.fail(newException(ValueError,
-                                    "Unsupported pqconnectPoll() result"))
+        retFuture.fail(newException(ValueError, "Unsupported pqconnectPoll() result"))
     return true
 
   conn.pgconn = pqconnectStart(connection)
@@ -150,7 +152,7 @@ proc reset*(conn: ApgConnection): Future[void] =
 
   var retFuture = newFuture[void]("asyncpg.reset")
 
-  proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
+  proc cb(fd: AsyncFD): bool {.closure, gcsafe.} =
     if not retFuture.finished:
       case pqresetPoll(conn.pgconn)
       of PGRES_POLLING_READING:
@@ -167,8 +169,7 @@ proc reset*(conn: ApgConnection): Future[void] =
         retFuture.complete()
       else:
         unregister(fd)
-        retFuture.fail(newException(ValueError,
-                                    "Unsupported pqresetPoll() result"))
+        retFuture.fail(newException(ValueError, "Unsupported pqresetPoll() result"))
     return true
 
   if conn.pgconn != nil:
@@ -180,7 +181,6 @@ proc reset*(conn: ApgConnection): Future[void] =
   else:
     retFuture.fail(newException(ValueError, "Connection is already closed"))
   return retFuture
-
 
 proc close*(conn: ApgConnection) =
   ## Closes connection to PostgreSQL server
@@ -235,21 +235,20 @@ template processPendingNotifications(conn: ApgConnection, notify: bool) =
     else:
       break
 
-proc copyTo*(conn: ApgConnection, buffer: pointer,
-            nbytes: int32): Future[ApgResult] =
+proc copyTo*(conn: ApgConnection, buffer: pointer, nbytes: int32): Future[ApgResult] =
   ## Copy data from buffer ``buffer`` of size ``nbytes`` to PostgreSQL's
-  ## stdin. 
+  ## stdin.
   ## Be sure to execute ``COPY FROM`` statement before start sending data with
   ## this function. After all data have been sent, you need to finish sending
   ## process with call ``copyTo(conn, nil, 0)``.
-  ## Function returns apgResult.
+  ## Function returns ApgResult.
   var retFuture = newFuture[ApgResult]("asyncpg.copyTo")
   var apgres = ApgResult()
   apgres.pgress = newSeq[PPGresult]()
   var state = 0
   var notify = true
 
-  proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
+  proc cb(fd: AsyncFD): bool {.closure, gcsafe.} =
     if not retFuture.finished:
       if state == 0:
         let res = pqflush(conn.pgconn)
@@ -282,8 +281,7 @@ proc copyTo*(conn: ApgConnection, buffer: pointer,
                   retFuture.complete(apgres)
                   return true
                 else:
-                  retFuture.fail(newException(ValueError,
-                                              $pqerrorMessage(conn.pgconn)))
+                  retFuture.fail(newException(ValueError, $pqerrorMessage(conn.pgconn)))
                   return true
               else:
                 retFuture.complete(apgres)
@@ -308,16 +306,15 @@ proc copyTo*(conn: ApgConnection, buffer: pointer,
       if r != nil:
         let stres = pqresultStatus(r)
         case stres
-          of PGRES_EMPTY_QUERY, PGRES_COMMAND_OK, PGRES_TUPLES_OK:
-            apgres.pgress.add(r)
-          of PGRES_COPY_IN:
-            apgres.pgress.add(r)
-            retFuture.complete(apgres)
-            break
-          else:
-            retFuture.fail(newException(ValueError,
-                                        $pqerrorMessage(conn.pgconn)))
-            break
+        of PGRES_EMPTY_QUERY, PGRES_COMMAND_OK, PGRES_TUPLES_OK:
+          apgres.pgress.add(r)
+        of PGRES_COPY_IN:
+          apgres.pgress.add(r)
+          retFuture.complete(apgres)
+          break
+        else:
+          retFuture.fail(newException(ValueError, $pqerrorMessage(conn.pgconn)))
+          break
       else:
         retFuture.complete(apgres)
         break
@@ -327,8 +324,7 @@ proc copyTo*(conn: ApgConnection, buffer: pointer,
 
   return retFuture
 
-proc copyFromInto*(conn: ApgConnection, buffer: pointer,
-                   nbytes: int): Future[int] =
+proc copyFromInto*(conn: ApgConnection, buffer: pointer, nbytes: int): Future[int] =
   ## Copy data caused by sql `COPY TO` statement to buffer `buffer`.
   ## Because rows received one by one, size of buffer `nbytes` must be
   ## more or equal to text representation of single row.
@@ -343,10 +339,9 @@ proc copyFromInto*(conn: ApgConnection, buffer: pointer,
   var notify = true
   var copyString: pointer = nil
 
-  proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
+  proc cb(fd: AsyncFD): bool {.closure, gcsafe.} =
     if not retFuture.finished:
-      let res = pqgetCopyData(conn.pgconn, cast[cstringArray](addr copyString), 
-                              1)
+      let res = pqgetCopyData(conn.pgconn, cast[cstringArray](addr copyString), 1)
       if res > 0:
         doAssert(res.int <= nbytes)
         copyMem(cast[pointer](buffer), copyString, res)
@@ -360,7 +355,8 @@ proc copyFromInto*(conn: ApgConnection, buffer: pointer,
         else:
           return false
       elif res == -1:
-        if copyString != nil: pqfreemem(copyString)
+        if copyString != nil:
+          pqfreemem(copyString)
         # processing pending notifications
         processPendingNotifications(conn, notify)
         # processing result
@@ -370,14 +366,14 @@ proc copyFromInto*(conn: ApgConnection, buffer: pointer,
             let stres = pqresultStatus(r)
             pqclear(r)
             if stres != PGRES_COMMAND_OK:
-              retFuture.fail(newException(ValueError,
-                                          $pqerrorMessage(conn.pgconn)))
+              retFuture.fail(newException(ValueError, $pqerrorMessage(conn.pgconn)))
           else:
             retFuture.complete(0)
             break
         return true
       else:
-        if copyString != nil: pqfreemem(copyString)
+        if copyString != nil:
+          pqfreemem(copyString)
         retFuture.fail(newException(ValueError, $pqerrorMessage(conn.pgconn)))
         return true
 
@@ -398,15 +394,22 @@ template withConnection*(pool: ApgPool, conn, body: untyped) =
     body
   pool.futures[index].complete()
 
-proc execAsync(conn: ApgConnection, statement: string, pN: int32, pT: POid,
-               pV: cstringArray, pL, pF: ptr int32,
-               rF: int32, notify = true): Future[ApgResult] =
+proc execAsync(
+    conn: ApgConnection,
+    statement: string,
+    pN: int32,
+    pT: POid,
+    pV: cstringArray,
+    pL, pF: ptr int32,
+    rF: int32,
+    notify = true,
+): Future[ApgResult] =
   var retFuture = newFuture[ApgResult]("asyncpg.exec")
   var apgres = ApgResult()
   apgres.pgress = newSeq[PPGresult]()
   var state = 0
 
-  proc cb(fd: AsyncFD): bool {.closure,gcsafe.} =
+  proc cb(fd: AsyncFD): bool {.closure, gcsafe.} =
     if not retFuture.finished:
       if state == 0:
         let res = pqflush(conn.pgconn)
@@ -439,8 +442,7 @@ proc execAsync(conn: ApgConnection, statement: string, pN: int32, pT: POid,
                   retFuture.complete(apgres)
                   return true
                 else:
-                  retFuture.fail(newException(ValueError,
-                                              $pqerrorMessage(conn.pgconn)))
+                  retFuture.fail(newException(ValueError, $pqerrorMessage(conn.pgconn)))
                   return true
               else:
                 retFuture.complete(apgres)
@@ -462,12 +464,18 @@ proc execAsync(conn: ApgConnection, statement: string, pN: int32, pT: POid,
     discard cb(fd)
   return retFuture
 
-proc execPoolAsync(pool: ApgPool, statement: string, pN: int32, pT: POid,
-                   pV: cstringArray, pL, pF: ptr int32,
-                   rF: int32): Future[apgResult] {.async.} =
+proc execPoolAsync(
+    pool: ApgPool,
+    statement: string,
+    pN: int32,
+    pT: POid,
+    pV: cstringArray,
+    pL, pF: ptr int32,
+    rF: int32,
+): Future[ApgResult] {.async.} =
   var index = await getFreeConnection(pool)
-  result = await execAsync(pool.connections[index], statement, pN, pT,
-                           pV, pL, pF, rF, false)
+  result =
+    await execAsync(pool.connections[index], statement, pN, pT, pV, pL, pF, rF, false)
   # processing connection notifies
   for cnode in pool.connections[index].notifies.nodes():
     for pnode in pool.notifies.nodes():
@@ -497,7 +505,7 @@ proc `[]`*(apgres: ApgResult, index: int): PPGresult =
   result = apgres.pgress[index]
 
 template setRow(pgres: PPGresult, r, line, cols) =
-  for col in 0..<cols:
+  for col in 0 ..< cols:
     let x = pqgetvalue(pgres, line.int32, col.int32)
     if x.isNil:
       r[col] = "" # nil
@@ -505,7 +513,7 @@ template setRow(pgres: PPGresult, r, line, cols) =
       r[col] = $x
 
 template setRowInline(pgres: PPGresult, r, line, cols) =
-  for col in 0..<cols:
+  for col in 0 ..< cols:
     setLen(r[col], 0)
     let x = pqgetvalue(pgres, line.int32, col.int32)
     if x.isNil:
@@ -517,8 +525,11 @@ proc getValue*(pgres: PPGresult): string =
   ## Returns single value from result ``pgres``.
 
   var x = pqgetvalue(pgres, 0, 0)
-  result = if isNil(x): "" else: $x
-
+  result =
+    if isNil(x):
+      ""
+    else:
+      $x
 
 proc getRow*(pgres: PPGresult): Row =
   ## Returns ``Row`` value from result ``pgres``.
@@ -537,7 +548,7 @@ proc getRows*(pgres: PPGresult, rows: int): seq[Row] =
   if (rows != -1) and (rows < R):
     R = rows
   result = newSeq[Row](R)
-  for row in 0..<R:
+  for row in 0 ..< R:
     result[row] = newSeq[string](L)
     setRow(pgres, result[row], row, L)
 
@@ -552,9 +563,9 @@ iterator rows*(pgres: PPGresult): Row =
   var L = pqnfields(pgres)
   var R = pqntuples(pgres)
   var result = newSeq[string](L)
-  for i in 0..<L:
+  for i in 0 ..< L:
     result[i] = ""
-  for i in 0..<R:
+  for i in 0 ..< R:
     setRowInline(pgres, result, i, L)
     yield result
 
@@ -563,8 +574,7 @@ proc getAffectedRows*(pgres: PPGresult): int64 =
 
   result = parseBiggestInt($pqcmdTuples(pgres))
 
-proc setClientEncoding*(conn: ApgConnection,
-                        encoding: string): Future[void] {.async.} =
+proc setClientEncoding*(conn: ApgConnection, encoding: string): Future[void] {.async.} =
   ## Sets the client encoding.
 
   var statement = "set client_encoding to '" & encoding & "'"
@@ -603,118 +613,125 @@ proc showError(s: string, n: NimNode = nil) {.compileTime.} =
     error(s)
   else:
     error(s & ", at " & lineinfo(n))
+
 # var <n> = <v>
 proc newVarArray(n, v: NimNode): NimNode {.compileTime.} =
-  result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(n, newEmptyNode(), v)
-  )
+  result =
+    newNimNode(nnkVarSection).add(newNimNode(nnkIdentDefs).add(n, newEmptyNode(), v))
+
 # cast[pointer](addr <n>)
 proc castPointer(n: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkCast).add(
-    newIdentNode("pointer"),
-    newNimNode(nnkCommand).add(newIdentNode("addr"), n)
-  )
+      newIdentNode("pointer"), newNimNode(nnkCommand).add(newIdentNode("addr"), n)
+    )
+
 # cast[<v>](addr <n>[0])
 proc castPointer0(n: NimNode, v: string): NimNode {.compileTime.} =
   result = newNimNode(nnkCast).add(
-    newIdentNode(v),
-    newNimNode(nnkCommand).add(
-      newIdentNode("addr"),
-      newNimNode(nnkBracketExpr).add(n, newLit(0))
+      newIdentNode(v),
+      newNimNode(nnkCommand).add(
+        newIdentNode("addr"), newNimNode(nnkBracketExpr).add(n, newLit(0))
+      ),
     )
-  )
+
 # <v>.Oid
 proc castOid(v: int): NimNode {.compileTime.} =
   result = newDotExpr(newLit(v), newIdentNode("Oid"))
+
 # len(<v>)
 proc callLength(n: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkCall).add(newIdentNode("len"), n)
+
 # size(<v>)
 proc callSize(n: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkCall).add(newIdentNode("size"), n)
+
 # raw(<v>)
 proc callRaw(n: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkCall).add(newIdentNode("raw"), n)
+
 # cast[<v>](n)
 proc castSome(n: NimNode, v: string): NimNode {.compileTime.} =
   result = newNimNode(nnkCast).add(newIdentNode(v), n)
+
 # var <n> = prepare(<v>)
 proc newVarInteger(n, v: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(
-      n, newEmptyNode(), newNimNode(nnkCall).add(newIdentNode("prepare"), v)
+      newNimNode(nnkIdentDefs).add(
+        n, newEmptyNode(), newNimNode(nnkCall).add(newIdentNode("prepare"), v)
+      )
     )
-  )
+
 # var <n> = <v>
 proc newVarSimple(n, v: NimNode): NimNode {.compileTime.} =
-  result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(n, newEmptyNode(), v)
-  )
+  result =
+    newNimNode(nnkVarSection).add(newNimNode(nnkIdentDefs).add(n, newEmptyNode(), v))
+
 # var <n> = cast[<i>](<v>)
 proc newVarCast(n, i, v: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(
-      n, newEmptyNode(), newNimNode(nnkCast).add(v, i)
+      newNimNode(nnkIdentDefs).add(n, newEmptyNode(), newNimNode(nnkCast).add(v, i))
     )
-  )
+
 # var <n> = <c>()
 proc newVarExec(n, c: NimNode): NimNode {.compileTime.} =
-  result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(n, newEmptyNode(), c)
-  )
+  result =
+    newNimNode(nnkVarSection).add(newNimNode(nnkIdentDefs).add(n, newEmptyNode(), c))
+
 # var <n> = $(<v>)
 proc newVarStringify(n, v: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(n, newEmptyNode(),
-      newNimNode(nnkPrefix).add(
-        newIdentNode("$"),
-        newNimNode(nnkPar).add(v)
+      newNimNode(nnkIdentDefs).add(
+        n,
+        newEmptyNode(),
+        newNimNode(nnkPrefix).add(newIdentNode("$"), newNimNode(nnkPar).add(v)),
       )
     )
-  )
 
 # var <n> = prepare(cast[<i>](<v>))
 proc newVarFloat(n, i, v: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(
-      n, newEmptyNode(),
-      newNimNode(nnkCall).add(
-        newIdentNode("prepare"),
-        newNimNode(nnkCast).add(v, i)
+      newNimNode(nnkIdentDefs).add(
+        n,
+        newEmptyNode(),
+        newNimNode(nnkCall).add(newIdentNode("prepare"), newNimNode(nnkCast).add(v, i)),
       )
     )
-  )
+
 # var <n> = newPgArray((<v>))
 proc newVarSeq(n, v: NimNode, s: string): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(
-      n, newEmptyNode(),
-      newCall(
-        newNimNode(nnkBracketExpr).add(
-          newIdentNode("newPgArray"),
-          newIdentNode(s)
-        ), v, newIdentNode("true")
+      newNimNode(nnkIdentDefs).add(
+        n,
+        newEmptyNode(),
+        newCall(
+          newNimNode(nnkBracketExpr).add(newIdentNode("newPgArray"), newIdentNode(s)),
+          v,
+          newIdentNode("true"),
+        ),
       )
     )
-  )
+
 # var <n> = newPgJson((<v>))
 proc newVarJson(n, v: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkVarSection).add(
-    newNimNode(nnkIdentDefs).add(
-      n, newEmptyNode(), newCall(newIdentNode("newPgJson"), v)
+      newNimNode(nnkIdentDefs).add(
+        n, newEmptyNode(), newCall(newIdentNode("newPgJson"), v)
+      )
     )
-  )
+
 # addr(<n>[0])
 proc newAddr0(n: NimNode): NimNode {.compileTime.} =
   result = newNimNode(nnkCommand).add(
-             newIdentNode("addr"),
-             newNimNode(nnkBracketExpr).add(n, newLit(0))
-           )
+      newIdentNode("addr"), newNimNode(nnkBracketExpr).add(n, newLit(0))
+    )
+
 # this is copy of newLit(int) but makes int32
 proc newLit(i: int32): NimNode {.compileTime.} =
   ## produces a new integer literal node.
   result = newNimNode(nnkInt32Lit)
   result.intVal = i
+
 # echo(repr(<n>))
 # proc newEchoVar(n: NimNode): NimNode {.compileTime.} =
 #   result = newNimNode(nnkCall).add(
@@ -722,19 +739,21 @@ proc newLit(i: int32): NimNode {.compileTime.} =
 #     newNimNode(nnkCall).add(newIdentNode("repr"), n)
 #   )
 proc `$`(ntyType: NimTypeKind): string =
-  var names = ["int", "int8", "int16", "int32", "int64", "float", "float32",
-               "float64", "", "uint", "uint8", "uint16", "uint32", "uint64"]
+  var names = [
+    "int", "int8", "int16", "int32", "int64", "float", "float32", "float64", "", "uint",
+    "uint8", "uint16", "uint32", "uint64",
+  ]
   case ntyType
-    of ntyBool:
-      result = "bool"
-    of ntyChar:
-      result = "char"
-    of ntyString:
-      result = "string"
-    of ntyInt..ntyFloat64, ntyUint..ntyUInt64:
-      result = names[ntyType.int - ntyInt.int]
-    else:
-      result = ""
+  of ntyBool:
+    result = "bool"
+  of ntyChar:
+    result = "char"
+  of ntyString:
+    result = "string"
+  of ntyInt .. ntyFloat64, ntyUint .. ntyUInt64:
+    result = names[ntyType.int - ntyInt.int]
+  else:
+    result = ""
 
 # This procedure converts Nim's array/sequence type to appropriate
 # PostgreSQL Array Type Oid.
@@ -797,8 +816,7 @@ proc getOidArray(ntyType: NimTypeKind): int {.compileTime.} =
 # float => float8(701), float type is always float64 in nim.
 # int => int8(20), int4(23), int2(21), depends on platform's size of `int`
 # uint => int8(20), int4(23), int2(21), depends on platform's size of `int`
-proc getOidSimple(ntyType: NimTypeKind):
-                  tuple[oid: int, size: int] {.compileTime.} =
+proc getOidSimple(ntyType: NimTypeKind): tuple[oid: int, size: int] {.compileTime.} =
   case ntyType
   of ntyBool:
     result = (oid: 16, size: 1)
@@ -853,8 +871,13 @@ proc getSequence(ls, ps, op, ntp, np, pv, pl, pt, pf: NimNode) {.compileTime.} =
       pl.add(castSome(callLength(np), "int32"))
       pt.add(castOid(17)) # bytea
       pf.add(newLit(1'i32))
-  of ntyBool, ntyInt, ntyUInt, ntyInt16..ntyInt64, ntyUInt16..ntyUInt64,
-     ntyFloat..ntyFloat64, ntyString:
+  of ntyBool,
+      ntyInt,
+      ntyUInt,
+      ntyInt16 .. ntyInt64,
+      ntyUInt16 .. ntyUInt64,
+      ntyFloat .. ntyFloat64,
+      ntyString:
     ls.add(newVarSeq(np, op, $impType))
     pv.add(callRaw(np))
     pl.add(castSome(callSize(np), "int32"))
@@ -864,28 +887,45 @@ proc getSequence(ls, ps, op, ntp, np, pv, pl, pt, pf: NimNode) {.compileTime.} =
   else:
     showError("Argument's type `seq[" & $impType & "]`is not supported", op)
 
-macro exec*(conn: ApgConnection|ApgPool, statement: string,
-            params: varargs[typed]): Future[ApgResult] =
+macro exec*(
+    conn: ApgConnection | ApgPool, statement: string, params: varargs[typed]
+): Future[ApgResult] =
   ## Submits a command ``statement`` to the server connection
   ## or connection's pool. ``params`` is SQL parameters which will
   ## be passed with command.
 
   # if there no params, we just generate call to execAsync
   if len(params) == 0:
-    if $getTypeInst(conn).symbol == "apgConnection":
-      result = newTree(nnkStmtListExpr,
-                 newCall(bindSym"execAsync", conn, statement, newLit 0,
-                         newNimNode(nnkNilLit), newNimNode(nnkNilLit),
-                         newNimNode(nnkNilLit), newNimNode(nnkNilLit),
-                         newLit(0))
-               )
+    if $getTypeInst(conn).strVal == "ApgConnection":
+      result = newTree(
+        nnkStmtListExpr,
+        newCall(
+          bindSym"execAsync",
+          conn,
+          statement,
+          newLit 0,
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newLit(0),
+        ),
+      )
     else:
-      result = newTree(nnkStmtListExpr,
-                 newCall(bindSym"execPoolAsync", conn, statement, newLit 0,
-                         newNimNode(nnkNilLit), newNimNode(nnkNilLit),
-                         newNimNode(nnkNilLit), newNimNode(nnkNilLit),
-                         newLit(0))
-               )
+      result = newTree(
+        nnkStmtListExpr,
+        newCall(
+          bindSym"execPoolAsync",
+          conn,
+          statement,
+          newLit 0,
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newNimNode(nnkNilLit),
+          newLit(0),
+        ),
+      )
   else:
     result = newTree(nnkStmtListExpr)
 
@@ -912,118 +952,145 @@ macro exec*(conn: ApgConnection|ApgPool, statement: string,
       var np = genSym(nskVar, "param" & $idx)
       let kiType = getType(param).typeKind
       case kiType
-        of ntyBool:
-          let oid = getOidSimple(kiType)
-          result.add(newVarCast(np, param, newIdentNode("int8")))
-          valuesList.add(castPointer(np))
-          lensList.add(newLit(oid.size.int32))
-          typesList.add(castOid(oid.oid))
-          formatsList.add(newLit(1.int32))
-        of ntyChar, ntyInt8, ntyUInt8:
-          let oid = getOidSimple(kiType)
+      of ntyBool:
+        let oid = getOidSimple(kiType)
+        result.add(newVarCast(np, param, newIdentNode("int8")))
+        valuesList.add(castPointer(np))
+        lensList.add(newLit(oid.size.int32))
+        typesList.add(castOid(oid.oid))
+        formatsList.add(newLit(1.int32))
+      of ntyChar, ntyInt8, ntyUInt8:
+        let oid = getOidSimple(kiType)
+        result.add(newVarSimple(np, param))
+        valuesList.add(castPointer(np))
+        lensList.add(newLit(oid.size.int32))
+        typesList.add(castOid(oid.oid))
+        formatsList.add(newLit(1.int32))
+      of ntyInt, ntyUInt, ntyInt16 .. ntyInt64, ntyUInt16 .. ntyUInt64:
+        let oid = getOidSimple(kiType)
+        result.add(newVarInteger(np, param))
+        valuesList.add(castPointer(np))
+        lensList.add(newLit(oid.size.int32))
+        typesList.add(castOid(oid.oid))
+        formatsList.add(newLit(1.int32))
+      of ntyFloat .. ntyFloat64:
+        let oid = getOidSimple(kiType)
+        var nident: NimNode
+        if kiType == ntyFloat or kiType == ntyFloat64:
+          nident = newIdentNode("int64")
+        else:
+          nident = newIdentNode("int32")
+        result.add(newVarFloat(np, param, nident))
+        valuesList.add(castPointer(np))
+        lensList.add(newLit(oid.size.int32))
+        typesList.add(castOid(oid.oid))
+        formatsList.add(newLit(1.int32))
+      of ntyString, ntyCString:
+        if param.kind == nnkStrLit:
           result.add(newVarSimple(np, param))
-          valuesList.add(castPointer(np))
-          lensList.add(newLit(oid.size.int32))
-          typesList.add(castOid(oid.oid))
+          valuesList.add(castPointer0(np, "pointer"))
+          lensList.add(castSome(callLength(np), "int32"))
+        else:
+          valuesList.add(castPointer0(param, "pointer"))
+          lensList.add(castSome(callLength(param), "int32"))
+        typesList.add(castOid(25))
+        formatsList.add(newLit(1.int32))
+      of ntySequence:
+        var imp = getTypeImpl(param)
+        var ntp = getType(imp[1])
+        getSequence(
+          result, postNodes, param, ntp, np, valuesList, lensList, typesList,
+          formatsList,
+        )
+      of ntyArray:
+        var imp = getTypeImpl(param)
+        var ntp = getType(imp[2])
+        getSequence(
+          result, postNodes, param, ntp, np, valuesList, lensList, typesList,
+          formatsList,
+        )
+      of ntyDistinct:
+        var name = $getTypeInst(param).strVal
+        case name
+        of "JsonB":
+          result.add(newVarJson(np, param[1]))
+          valuesList.add(callRaw(np))
+          lensList.add(castSome(callSize(np), "int32"))
+          typesList.add(castOid(3802))
+          formatsList.add(newLit(1'i32))
+          postNodes.add(newCall(newIdentNode("free"), np))
+        of "Json":
+          result.add(newVarStringify(np, param[1]))
+          valuesList.add(castPointer0(np, "pointer"))
+          lensList.add(castSome(callLength(np), "int32"))
+          typesList.add(castOid(114)) # json oid
           formatsList.add(newLit(1.int32))
-        of ntyInt, ntyUInt, ntyInt16..ntyInt64, ntyUInt16..ntyUInt64:
-          let oid = getOidSimple(kiType)
-          result.add(newVarInteger(np, param))
-          valuesList.add(castPointer(np))
-          lensList.add(newLit(oid.size.int32))
-          typesList.add(castOid(oid.oid))
-          formatsList.add(newLit(1.int32))
-        of ntyFloat..ntyFloat64:
-          let oid = getOidSimple(kiType)
-          var nident: NimNode
-          if kiType == ntyFloat or kiType == ntyFloat64:
-            nident = newIdentNode("int64")
-          else:
-            nident = newIdentNode("int32")
-          result.add(newVarFloat(np, param, nident))
-          valuesList.add(castPointer(np))
-          lensList.add(newLit(oid.size.int32))
-          typesList.add(castOid(oid.oid))
-          formatsList.add(newLit(1.int32))
-        of ntyString, ntyCString:
-          if param.kind == nnkStrLit:
-            result.add(newVarSimple(np, param))
-            valuesList.add(castPointer0(np, "pointer"))
-            lensList.add(castSome(callLength(np), "int32"))
-          else:
-            valuesList.add(castPointer0(param, "pointer"))
-            lensList.add(castSome(callLength(param), "int32"))
-          typesList.add(castOid(25))
-          formatsList.add(newLit(1.int32))
-        of ntySequence:
-          var imp = getTypeImpl(param)
-          var ntp = getType(imp[1])
-          getSequence(result, postNodes, param, ntp, np, valuesList,
-                      lensList, typesList, formatsList)
-        of ntyArray:
-          var imp = getTypeImpl(param)
-          var ntp = getType(imp[2])
-          getSequence(result, postNodes, param, ntp, np, valuesList,
-                      lensList, typesList, formatsList)
-        of ntyDistinct:
-          var name = $getTypeInst(param).symbol
-          case name
-          of "JsonB":
-            result.add(newVarJson(np, param[1]))
-            valuesList.add(callRaw(np))
-            lensList.add(castSome(callSize(np), "int32"))
-            typesList.add(castOid(3802))
-            formatsList.add(newLit(1'i32))
-            postNodes.add(newCall(newIdentNode("free"), np))
-          of "Json":
-            result.add(newVarStringify(np, param[1]))
-            valuesList.add(castPointer0(np, "pointer"))
-            lensList.add(castSome(callLength(np), "int32"))
-            typesList.add(castOid(114)) # json oid
-            formatsList.add(newLit(1.int32))
-          else:
-            showError("Argument's type is not supported", param)
-        of ntyRef:
-          var name = $getTypeInst(param).symbol
-          if name == "JsonNode":
-            if param.kind == nnkPrefix:
-              var jsonCompiled = genSym(nskLet, "jsonCompiled" & $idx)
-              result.add(newLetStmt(jsonCompiled, param))
-              result.add(newVarStringify(np, jsonCompiled))
-            else:
-              result.add(newVarStringify(np, param))
-            valuesList.add(castPointer0(np, "pointer"))
-            lensList.add(castSome(callLength(np), "int32"))
-            typesList.add(castOid(114)) # json oid
-            formatsList.add(newLit(1.int32))
-          else:
-            showError("Argument's type object of `" & name & "`is not supported",
-                      param)
         else:
           showError("Argument's type is not supported", param)
+      of ntyRef:
+        var name = $getTypeInst(param).strVal
+        if name == "JsonNode":
+          if param.kind == nnkPrefix:
+            var jsonCompiled = genSym(nskLet, "jsonCompiled" & $idx)
+            result.add(newLetStmt(jsonCompiled, param))
+            result.add(newVarStringify(np, jsonCompiled))
+          else:
+            result.add(newVarStringify(np, param))
+          valuesList.add(castPointer0(np, "pointer"))
+          lensList.add(castSome(callLength(np), "int32"))
+          typesList.add(castOid(114)) # json oid
+          formatsList.add(newLit(1.int32))
+        else:
+          showError("Argument's type object of `" & name & "`is not supported", param)
+      else:
+        showError("Argument's type is not supported", param)
       inc(idx)
 
-    if $getTypeInst(conn).symbol == "apgConnection":
+    if $getTypeInst(conn).strVal == "ApgConnection":
       result.add(
-        valuesArray, typesArray, lensArray, formatsArray,
+        valuesArray,
+        typesArray,
+        lensArray,
+        formatsArray,
         #newEchoVar(valuesName), newEchoVar(typesName),
         #newEchoVar(lensName), newEchoVar(formatsName),
-        newVarExec(execFuture,
-          newCall(bindSym"execAsync", conn, statement,
-                  newLit len(params), castPointer0(typesName, "POid"),
-                  castPointer0(valuesName, "cstringArray"),
-                  newAddr0(lensName), newAddr0(formatsName), newLit(0)))
+        newVarExec(
+          execFuture,
+          newCall(
+            bindSym"execAsync",
+            conn,
+            statement,
+            newLit len(params),
+            castPointer0(typesName, "POid"),
+            castPointer0(valuesName, "cstringArray"),
+            newAddr0(lensName),
+            newAddr0(formatsName),
+            newLit(0),
+          ),
+        ),
       )
     else:
       result.add(
-        valuesArray, typesArray, lensArray, formatsArray,
+        valuesArray,
+        typesArray,
+        lensArray,
+        formatsArray,
         #newEchoVar(valuesName), newEchoVar(typesName),
         #newEchoVar(lensName), newEchoVar(formatsName),
-        newVarExec(execFuture,
-          newCall(bindSym"execPoolAsync", conn, statement,
-                  newLit len(params), castPointer0(typesName, "POid"),
-                  castPointer0(valuesName, "cstringArray"),
-                  newAddr0(lensName), newAddr0(formatsName), newLit(0)))
+        newVarExec(
+          execFuture,
+          newCall(
+            bindSym"execPoolAsync",
+            conn,
+            statement,
+            newLit len(params),
+            castPointer0(typesName, "POid"),
+            castPointer0(valuesName, "cstringArray"),
+            newAddr0(lensName),
+            newAddr0(formatsName),
+            newLit(0),
+          ),
+        ),
       )
     for child in postNodes.children:
       result.add(child)
@@ -1046,8 +1113,7 @@ template checkResultTuple(res) =
   if sres != PGRES_TUPLES_OK:
     raise newException(ValueError, $pqerrorMessage(res.pgress[0].conn))
 
-proc listenNotify*(conn: ApgConnection,
-                   channel: string): Future[void] {.async.} =
+proc listenNotify*(conn: ApgConnection, channel: string): Future[void] {.async.} =
   ## Registers listening for asynchronous notifies on connection ``conn`` and
   ## channel ``channel``.
 
@@ -1055,8 +1121,7 @@ proc listenNotify*(conn: ApgConnection,
   var res = await exec(conn, query)
   checkResultCommand(res)
 
-proc listenNotify*(pool: ApgPool,
-                   channel: string): Future[void] {.async.} =
+proc listenNotify*(pool: ApgPool, channel: string): Future[void] {.async.} =
   ## Registers listening for asynchronous notifies on pool ``pool`` and
   ## channel ``channel``.
 
@@ -1064,8 +1129,7 @@ proc listenNotify*(pool: ApgPool,
   var res = await exec(pool, query)
   checkResultCommand(res)
 
-proc unlistenNotify*(conn: ApgConnection,
-                     channel: string): Future[void] {.async.} =
+proc unlistenNotify*(conn: ApgConnection, channel: string): Future[void] {.async.} =
   ## Unregisters listening for asynchronous notifies on connection ``conn`` and
   ## channel ``channel``.
 
@@ -1073,8 +1137,7 @@ proc unlistenNotify*(conn: ApgConnection,
   var res = await exec(conn, query)
   checkResultCommand(res)
 
-proc unlistenNotify*(pool: ApgPool,
-                     channel: string): Future[void] {.async.} =
+proc unlistenNotify*(pool: ApgPool, channel: string): Future[void] {.async.} =
   ## Unregisters listening for asynchronous notifies on pool ``pool`` and
   ## channel ``channel``.
 
@@ -1082,8 +1145,9 @@ proc unlistenNotify*(pool: ApgPool,
   var res = await exec(pool, query)
   checkResultCommand(res)
 
-proc sendNotify*(conn: ApgConnection, channel: string,
-                 payload: string): Future[void] {.async.} =
+proc sendNotify*(
+    conn: ApgConnection, channel: string, payload: string
+): Future[void] {.async.} =
   ## Send asynchronous notify to channel ``channel`` with data in ``payload``.
   ## Be sure size of ``payload`` must be less, than 8000 bytes.
 
@@ -1096,8 +1160,9 @@ proc sendNotify*(conn: ApgConnection, channel: string,
   var res = await exec(conn, query, p1, p2)
   checkResultTuple(res)
 
-proc sendNotify*(pool: ApgPool, channel: string,
-                 payload: string): Future[void] {.async.} =
+proc sendNotify*(
+    pool: ApgPool, channel: string, payload: string
+): Future[void] {.async.} =
   ## Send asynchronous notify to channel ``channel`` with data in ``payload``.
   ## Be sure size of ``payload`` must be less, than 8000 bytes.
 
@@ -1110,13 +1175,13 @@ proc sendNotify*(pool: ApgPool, channel: string,
   var res = await exec(pool, query, p1, p2)
   checkResultTuple(res)
 
-proc notify*(conn: ApgConnection|ApgPool, channel: string): Future[ApgNotify] =
-  ## Returns future, which will receive `apgNotify`, when asynchronous notify
+proc notify*(conn: ApgConnection | ApgPool, channel: string): Future[ApgNotify] =
+  ## Returns future, which will receive `ApgNotify`, when asynchronous notify
   ## on channel ``channel`` arrives.
 
-  var cell = apgNotifyCell()
+  var cell = ApgNotifyCell()
   cell.notify.channel = channel
-  cell.future = newFuture[apgNotify]("asyncpg.notify")
+  cell.future = newFuture[ApgNotify]("asyncpg.notify")
   conn.notifies.append(cell)
   return cell.future
 
@@ -1124,11 +1189,13 @@ proc notify*(conn: ApgConnection|ApgPool, channel: string): Future[ApgNotify] =
 # Escape functions
 #
 
-proc pqescapeLiteral(conn: PPGconn, bintext: cstring, binlen: int): cstring
-     {.cdecl, dynlib: dllName, importc: "PQescapeLiteral".}
-proc pqescapeByteaConn(conn: PPGconn, bintext: cstring, binlen :int,
-                       resultlen: ptr int): cstring
-     {.cdecl, dynlib: dllName, importc: "PQescapeByteaConn".}
+proc pqescapeLiteral(
+  conn: PPGconn, bintext: cstring, binlen: int
+): cstring {.cdecl, dynlib: dllName, importc: "PQescapeLiteral".}
+
+proc pqescapeByteaConn(
+  conn: PPGconn, bintext: cstring, binlen: int, resultlen: ptr int
+): cstring {.cdecl, dynlib: dllName, importc: "PQescapeByteaConn".}
 
 proc escapeString*(conn: ApgConnection, str: string): string =
   ## Escapes a string for use within an SQL command according to rules
@@ -1159,4 +1226,3 @@ proc unescapeBytea*(str: string): seq[char] =
   result = newSeq[char](n)
   copyMem(addr result[0], r, n)
   pqfreemem(cast[pointer](r))
-

@@ -1,6 +1,6 @@
 import asyncdispatch, asyncpg
 
-proc testConnectionNotify(conn: apgConnection): Future[bool] {.async.} =
+proc testConnectionNotify(conn: ApgConnection): Future[bool] {.async.} =
   var r1 = false
   var r2 = false
   await conn.listenNotify("testChannel")
@@ -19,7 +19,7 @@ proc testConnectionNotify(conn: apgConnection): Future[bool] {.async.} =
     r2 = true
   result = r1 and r2
 
-proc testPoolNotify(pool: apgPool): Future[bool] {.async.} =
+proc testPoolNotify(pool: ApgPool): Future[bool] {.async.} =
   var r1 = false
   var r2 = false
   await pool.listenNotify("testChannel")

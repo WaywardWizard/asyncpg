@@ -1,6 +1,6 @@
 import asyncdispatch, asyncpg
 
-proc testRows(conn: apgConnection) {.async.} =
+proc testRows(conn: ApgConnection) {.async.} =
   block: # multiple statements in one query test
     var res = await asyncpg.exec(conn, "SELECT 3;SELECT 4;SELECT 5;")
     var length = len(res)
